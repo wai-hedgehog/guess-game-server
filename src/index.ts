@@ -27,6 +27,10 @@ app.post('/login', (req, res) => {
   return res.send({ login: false });
 });
 
+app.get('/games', (_req, res) => {
+  res.send({ games });
+});
+
 const server = createServer(app);
 const io = new Server(server, {
   cors: {
@@ -34,31 +38,32 @@ const io = new Server(server, {
   },
 });
 
+const getUsername = (socketId) => users[socketId];
+
 io.on('connection', (socket) => {
-  let username: string;
   console.log(`⚡: ${socket.id} client just connected!`);
   socket.on('disconnect', () => {
-    console.log(`${username} disconnected`);
+    console.log(`${getUsername(socket.id)} disconnected`);
     delete users[socket.id];
   });
 
-  socket.emit('games', games);
-
-  socket.on('create-game', (player) => {
-    const newGame = { player, id: socket.id, playerUsernames: [player] };
+  socket.on('create-game', () => {
+    const username = getUsername(socket.id);
+    const newGame = { host: username, id: socket.id, playerUsernames: [username] };
+    console.log(newGame);
     games.push(newGame);
     io.emit('games', games);
     socket.emit('enter-game', newGame);
     socket.join(socket.id);
   });
 
-  socket.on('join-game', ({ id, username }) => {
+  socket.on('join-game', ({ id }) => {
     console.log('joining', id);
     const existingGame = games.find((game) => game.id === id);
     if (existingGame) {
       games = games.map((game) => {
         if (game.id === id) {
-          game.playerUsernames.push(username);
+          game.playerUsernames.push(getUsername(socket.id));
         }
         return game;
       });
