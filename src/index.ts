@@ -5,8 +5,7 @@ import cors from 'cors';
 
 const PORT = process.env.PORT || 3000;
 
-const games = [];
-const players = [];
+let games = [];
 
 const app = express();
 app.use(cors());
@@ -29,9 +28,27 @@ io.on('connection', (socket) => {
   socket.emit('games', games);
 
   socket.on('create-game', (player) => {
-    console.log(player);
-    games.push({ player, playerIds: [socket.id] });
+    const newGame = { player, id: socket.id, playerUsernames: [player] };
+    games.push(newGame);
     io.emit('games', games);
+    socket.emit('enter-game', newGame);
+    socket.join(socket.id);
+  });
+
+  socket.on('join-game', ({ id, username }) => {
+    console.log('joining', id);
+    const existingGame = games.find((game) => game.id === id);
+    if (existingGame) {
+      games = games.map((game) => {
+        if (game.id === id) {
+          game.playerUsernames.push(username);
+        }
+        return game;
+      });
+      socket.join(existingGame.id);
+      socket.emit('enter-game', existingGame);
+      setTimeout(() => io.in(existingGame.id).emit('start-game', existingGame), 500);
+    }
   });
 
 //   setInterval(() => socket.emit('time', new Date().toTimeString()), 1000);
