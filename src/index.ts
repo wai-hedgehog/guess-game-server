@@ -6,8 +6,14 @@ import bodyParser from 'body-parser';
 
 const PORT = process.env.PORT || 3000;
 
+interface IUser {
+  username: string
+  game: any
+}
+interface IUsers { [key:string]: IUser}
+
 let games = [];
-const users = {};
+const users: IUsers = {};
 
 const app = express();
 app.use(bodyParser.json());
@@ -20,8 +26,8 @@ app.get('/', (_req, res) => {
 
 app.post('/login', (req, res) => {
   const { username, socketId } = (req.body);
-  if (users[socketId] || !Object.values(users).includes(username)) {
-    users[socketId] = username;
+  if (users[socketId] || !Object.values(users).find((user) => user.username === username)) {
+    users[socketId] = { username, game: null };
     return res.send({ login: true });
   }
   return res.send({ login: false });
@@ -38,7 +44,7 @@ const io = new Server(server, {
   },
 });
 
-const getUsername = (socketId) => users[socketId];
+const getUsername = (socketId) => users[socketId]?.username;
 
 io.on('connection', (socket) => {
   console.log(`⚡: ${socket.id} client just connected!`);
@@ -48,13 +54,15 @@ io.on('connection', (socket) => {
   });
 
   socket.on('create-game', () => {
-    const username = getUsername(socket.id);
-    const newGame = { host: username, id: socket.id, playerUsernames: [username] };
-    console.log(newGame);
-    games.push(newGame);
-    io.emit('games', games);
-    socket.emit('enter-game', newGame);
-    socket.join(socket.id);
+    if (!users[socket.id].game) { // if not already in a game
+      const username = getUsername(socket.id);
+      const newGame = { host: username, id: socket.id, playerUsernames: [username] };
+      games.push(newGame);
+      users[socket.id] = { ...users[socket.id], game: newGame };
+      io.emit('games', games);
+      socket.emit('enter-game', newGame);
+      socket.join(socket.id);
+    }
   });
 
   socket.on('join-game', ({ id }) => {
@@ -67,9 +75,11 @@ io.on('connection', (socket) => {
         }
         return game;
       });
-      socket.join(existingGame.id);
-      socket.emit('enter-game', existingGame);
-      setTimeout(() => io.in(existingGame.id).emit('start-game', existingGame), 500);
+      const updatedGame = games.find((game) => game.id === id);
+      users[socket.id] = { ...users[socket.id], game: updatedGame };
+      socket.join(updatedGame.id);
+      socket.emit('enter-game', updatedGame);
+      setTimeout(() => io.in(updatedGame.id).emit('start-game', updatedGame), 500);
     }
   });
 
