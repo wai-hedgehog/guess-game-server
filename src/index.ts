@@ -2,16 +2,29 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import bodyParser from 'body-parser';
 
 const PORT = process.env.PORT || 3000;
 
 let games = [];
+const users = {};
 
 const app = express();
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: false }));
 app.use(cors());
 
 app.get('/', (_req, res) => {
-  res.send({ uptime: process.uptime() });
+  res.send({ uptime: process.uptime(), games, users });
+});
+
+app.post('/login', (req, res) => {
+  const { username, socketId } = (req.body);
+  if (users[socketId] || !Object.values(users).includes(username)) {
+    users[socketId] = username;
+    return res.send({ login: true });
+  }
+  return res.send({ login: false });
 });
 
 const server = createServer(app);
@@ -22,8 +35,12 @@ const io = new Server(server, {
 });
 
 io.on('connection', (socket) => {
+  let username: string;
   console.log(`⚡: ${socket.id} client just connected!`);
-  socket.on('disconnect', () => console.log('Client disconnected'));
+  socket.on('disconnect', () => {
+    console.log(`${username} disconnected`);
+    delete users[socket.id];
+  });
 
   socket.emit('games', games);
 
