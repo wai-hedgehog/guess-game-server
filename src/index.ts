@@ -6,12 +6,24 @@ import bodyParser from 'body-parser';
 
 const PORT = process.env.PORT || 3000;
 
+enum GameState {
+  CREATING,
+  PLAYING,
+}
+
+interface IPlayer {
+  username: string
+  id: string
+}
+
 interface IGame {
   id: string
   host: string
-  players: string[]
+  players: IPlayer[]
   canJoin: boolean
+  state: GameState
 }
+interface IGames { [key:string]: IGame}
 
 interface IUser {
   username: string
@@ -19,7 +31,7 @@ interface IUser {
 }
 interface IUsers { [key:string]: IUser}
 
-let games = [];
+const games: IGames = {};
 const users: IUsers = {};
 
 const app = express();
@@ -52,11 +64,24 @@ const io = new Server(server, {
 });
 
 const getUsername = (socketId) => users[socketId]?.username;
+const emitStats = (socket) => socket.emit('stats', {
+  players: Object.values(users).length,
+  gamesInPlay: Object.values(games).filter((game) => game.state === GameState.PLAYING).length,
+});
 
 io.on('connection', (socket) => {
   console.log(`⚡: ${socket.id} client just connected!`);
+
   socket.on('disconnect', () => {
     console.log(`${getUsername(socket.id)} disconnected`);
+    const gameId = users[socket.id]?.game;
+    if (gameId) { // delete game that user was in
+      io.in(gameId).emit('opponent-disconnected');
+      games[gameId].players.forEach((player) => {
+        users[player.id].game = undefined;
+      });
+      delete games[gameId];
+    }
     delete users[socket.id];
   });
 
@@ -64,10 +89,14 @@ io.on('connection', (socket) => {
     if (!users[socket.id].game) { // if not already in a game
       const username = getUsername(socket.id);
       const newGame = {
-        host: username, id: socket.id, players: [username], canJoin: true,
+        id: socket.id,
+        host: username,
+        players: [{ username, id: socket.id }],
+        canJoin: true,
+        state: GameState.CREATING,
       };
-      games.push(newGame);
-      users[socket.id] = { ...users[socket.id], game: newGame.id };
+      games[socket.id] = (newGame);
+      users[socket.id] = { ...users[socket.id], game: socket.id };
       io.emit('games', games);
       socket.emit('creating-game', newGame);
       socket.join(socket.id);
@@ -76,23 +105,29 @@ io.on('connection', (socket) => {
 
   socket.on('join-game', ({ id }) => {
     console.log('joining', id);
-    const existingGame = games.find((game) => game.id === id);
+    const existingGame = games[id];
     if (existingGame && existingGame.canJoin) {
-      games = games.map((game) => {
-        if (game.id === id) {
-          return { ...game, players: [...game.players, getUsername(socket.id)], canJoin: false };
-        }
-        return game;
-      });
+      const updatedGame = {
+        ...games[id],
+        players: [...games[id].players, { username: getUsername(socket.id), id: socket.id }],
+        canJoin: false,
+        state: GameState.PLAYING,
+      };
       io.emit('games', games);
-      const updatedGame = games.find((game) => game.id === id);
-      users[socket.id] = { ...users[socket.id], game: updatedGame.id };
-      socket.join(updatedGame.id);
-      io.in(updatedGame.id).emit('start-game', updatedGame);
+      games[id] = updatedGame;
+      users[socket.id] = { ...users[socket.id], game: id };
+      socket.join(id);
+      io.in(id).emit('start-game', updatedGame);
     }
   });
 
-//   setInterval(() => socket.emit('time', new Date().toTimeString()), 1000);
+  socket.on('cancel-game', () => {
+    users[socket.id] = { ...users[socket.id], game: null };
+    delete games[socket.id];
+    io.emit('games', games);
+  });
+
+  setInterval(() => emitStats(socket), 1000);
 });
 
 server.listen(PORT, () => console.log(`Listening on ${PORT}`));
