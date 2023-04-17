@@ -6,6 +6,13 @@ import bodyParser from 'body-parser';
 
 const PORT = process.env.PORT || 3000;
 
+interface IGame {
+  id: string
+  host: string
+  players: string[]
+  canJoin: boolean
+}
+
 interface IUser {
   username: string
   game: any
@@ -56,11 +63,13 @@ io.on('connection', (socket) => {
   socket.on('create-game', () => {
     if (!users[socket.id].game) { // if not already in a game
       const username = getUsername(socket.id);
-      const newGame = { host: username, id: socket.id, playerUsernames: [username] };
+      const newGame = {
+        host: username, id: socket.id, players: [username], canJoin: true,
+      };
       games.push(newGame);
-      users[socket.id] = { ...users[socket.id], game: newGame };
+      users[socket.id] = { ...users[socket.id], game: newGame.id };
       io.emit('games', games);
-      socket.emit('enter-game', newGame);
+      socket.emit('creating-game', newGame);
       socket.join(socket.id);
     }
   });
@@ -68,18 +77,18 @@ io.on('connection', (socket) => {
   socket.on('join-game', ({ id }) => {
     console.log('joining', id);
     const existingGame = games.find((game) => game.id === id);
-    if (existingGame) {
+    if (existingGame && existingGame.canJoin) {
       games = games.map((game) => {
         if (game.id === id) {
-          game.playerUsernames.push(getUsername(socket.id));
+          return { ...game, players: [...game.players, getUsername(socket.id)], canJoin: false };
         }
         return game;
       });
+      io.emit('games', games);
       const updatedGame = games.find((game) => game.id === id);
-      users[socket.id] = { ...users[socket.id], game: updatedGame };
+      users[socket.id] = { ...users[socket.id], game: updatedGame.id };
       socket.join(updatedGame.id);
-      socket.emit('enter-game', updatedGame);
-      setTimeout(() => io.in(updatedGame.id).emit('start-game', updatedGame), 500);
+      io.in(updatedGame.id).emit('start-game', updatedGame);
     }
   });
 
