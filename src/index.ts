@@ -9,12 +9,67 @@ const PORT = process.env.PORT || 3000;
 enum GameState {
   CREATING,
   PLAYING,
+  FINISHED,
 }
 
 interface IPlayer {
   username: string
   id: string
 }
+
+enum GuessResult {
+  HIGHER,
+  LOWER,
+  CORRECT,
+}
+
+interface IPlayerTurnResult {
+  guess: number
+  guessResult: GuessResult
+  usedLie?: boolean
+  changedNumber?: number
+}
+
+interface ITurnResult {
+  turnNumber: number
+  player1: IPlayerTurnResult
+  player2: IPlayerTurnResult
+}
+
+interface IGamePlayer {
+  number: number
+  canChangeNumber: boolean
+  canUseLie: boolean
+}
+
+interface IPlayerTurn {
+  guess: number
+  useLie?: boolean
+  newNumber?: number
+}
+
+interface IPlayData {
+  turnResult?: ITurnResult[]
+  number: number
+  player1FinishedTurn?: boolean
+  player2FinishedTurn?: boolean
+}
+
+interface IGameData {
+  player1: IGamePlayer
+  player2: IGamePlayer
+  player1Turn: IPlayerTurn | null
+  player2Turn: IPlayerTurn | null
+  turns: ITurnResult[]
+  waitingPlayerTurn: boolean
+}
+interface IGameDatas { [key:string]: IGameData}
+
+interface IUser {
+  username: string
+  game: string
+}
+interface IUsers { [key:string]: IUser }
 
 interface IGame {
   id: string
@@ -23,16 +78,14 @@ interface IGame {
   canJoin: boolean
   state: GameState
 }
-interface IGames { [key:string]: IGame}
-
-interface IUser {
-  username: string
-  game: any
-}
-interface IUsers { [key:string]: IUser}
+interface IGames { [key:string]: IGame }
 
 const games: IGames = {};
 const users: IUsers = {};
+// used to store game data - away from games object so other player moves are hidden
+const gamePlayData: IGameDatas = {};
+
+const getRandomNumber = () => Math.floor(Math.random() * 500) + 1;
 
 const app = express();
 app.use(bodyParser.json());
@@ -40,7 +93,9 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(cors());
 
 app.get('/', (_req, res) => {
-  res.send({ uptime: process.uptime(), games, users });
+  res.send({
+    uptime: process.uptime(), games, users, gamePlayData,
+  });
 });
 
 app.post('/login', (req, res) => {
@@ -88,36 +143,64 @@ io.on('connection', (socket) => {
   socket.on('create-game', () => {
     if (!users[socket.id].game) { // if not already in a game
       const username = getUsername(socket.id);
+      const gameId = `GAME-${socket.id}`;
       const newGame = {
-        id: socket.id,
+        id: gameId,
         host: username,
         players: [{ username, id: socket.id }],
         canJoin: true,
         state: GameState.CREATING,
       };
-      games[socket.id] = (newGame);
-      users[socket.id] = { ...users[socket.id], game: socket.id };
+      games[gameId] = (newGame);
+      users[socket.id] = { ...users[socket.id], game: gameId };
       io.emit('games', games);
       socket.emit('creating-game', newGame);
-      socket.join(socket.id);
+      socket.join(gameId);
     }
   });
 
-  socket.on('join-game', ({ id }) => {
-    console.log('joining', id);
-    const existingGame = games[id];
+  socket.on('join-game', ({ gameId }) => {
+    console.log('joining', gameId);
+    const existingGame = games[gameId];
     if (existingGame && existingGame.canJoin) {
       const updatedGame = {
-        ...games[id],
-        players: [...games[id].players, { username: getUsername(socket.id), id: socket.id }],
+        ...games[gameId],
+        players: [...games[gameId].players, { username: getUsername(socket.id), id: socket.id }],
         canJoin: false,
         state: GameState.PLAYING,
       };
       io.emit('games', games);
-      games[id] = updatedGame;
-      users[socket.id] = { ...users[socket.id], game: id };
-      socket.join(id);
-      io.in(id).emit('start-game', updatedGame);
+      games[gameId] = updatedGame;
+      users[socket.id] = { ...users[socket.id], game: gameId };
+      socket.join(gameId);
+
+      const gameData: IGameData = {
+        player1: {
+          number: getRandomNumber(),
+          canChangeNumber: true,
+          canUseLie: true,
+        },
+        player2: {
+          number: getRandomNumber(),
+          canChangeNumber: true,
+          canUseLie: true,
+        },
+        player1Turn: null,
+        player2Turn: null,
+        turns: [],
+        waitingPlayerTurn: true,
+      };
+
+      gamePlayData[gameId] = gameData;
+      updatedGame.players.forEach((player, i) => {
+        const playData: IPlayData = {
+          number: gameData[`player${i + 1}`].number,
+          player1FinishedTurn: false,
+          player2FinishedTurn: false,
+          turnResult: [],
+        };
+        io.to(player.id).emit('start-game', updatedGame, playData, player);
+      });
     }
   });
 
