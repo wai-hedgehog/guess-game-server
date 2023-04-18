@@ -7,33 +7,34 @@ import bodyParser from 'body-parser';
 const PORT = process.env.PORT || 3000;
 
 enum GameState {
-  CREATING,
-  PLAYING,
-  FINISHED,
+  CREATING = 'CREATING',
+  PLAYING = 'PLAYING',
+  FINISHED = 'FINISHED',
 }
 
 interface IPlayer {
   username: string
   id: string
+  player: string
 }
 
 enum GuessResult {
-  HIGHER,
-  LOWER,
-  CORRECT,
+  HIGHER = 'HIGHER',
+  LOWER = 'LOWER',
+  CORRECT = 'CORRECT',
 }
 
 interface IPlayerTurnResult {
   guess: number
-  guessResult: GuessResult
-  usedLie?: boolean
-  changedNumber?: number
+  guessResult?: GuessResult
+  useLie: boolean
+  changeNumber: boolean
 }
 
 interface ITurnResult {
   turnNumber: number
-  player1: IPlayerTurnResult
-  player2: IPlayerTurnResult
+  player1: IPlayerTurnResult | null
+  player2: IPlayerTurnResult | null
 }
 
 interface IGamePlayer {
@@ -44,24 +45,22 @@ interface IGamePlayer {
 
 interface IPlayerTurn {
   guess: number
-  useLie?: boolean
-  newNumber?: number
+  useLie: boolean
+  changeNumber: boolean
 }
 
 interface IPlayData {
-  turnResult?: ITurnResult[]
+  turnResult: ITurnResult[]
   number: number
-  player1FinishedTurn?: boolean
-  player2FinishedTurn?: boolean
+  turnSubmitted: boolean
+  oppponentTurnSubmitted: boolean
 }
 
 interface IGameData {
   player1: IGamePlayer
   player2: IGamePlayer
-  player1Turn: IPlayerTurn | null
-  player2Turn: IPlayerTurn | null
+  currentTurn: ITurnResult
   turns: ITurnResult[]
-  waitingPlayerTurn: boolean
 }
 interface IGameDatas { [key:string]: IGameData}
 
@@ -118,6 +117,13 @@ const io = new Server(server, {
   },
 });
 
+const omitOpponentData = (turnRes: ITurnResult, player: string): ITurnResult => {
+  const opponent = player === 'player1' ? 'player2' : 'player1';
+  const opponentFullData = turnRes[opponent];
+  const opponentData = { guess: opponentFullData.guess, GuessResult: opponentFullData.guessResult };
+  return { ...turnRes, [opponent]: opponentData };
+};
+
 const getUsername = (socketId) => users[socketId]?.username;
 const emitStats = (socket) => socket.emit('stats', {
   players: Object.values(users).length,
@@ -147,7 +153,7 @@ io.on('connection', (socket) => {
       const newGame = {
         id: gameId,
         host: username,
-        players: [{ username, id: socket.id }],
+        players: [{ username, id: socket.id, player: 'player1' }],
         canJoin: true,
         state: GameState.CREATING,
       };
@@ -165,7 +171,7 @@ io.on('connection', (socket) => {
     if (existingGame && existingGame.canJoin) {
       const updatedGame = {
         ...games[gameId],
-        players: [...games[gameId].players, { username: getUsername(socket.id), id: socket.id }],
+        players: [...games[gameId].players, { username: getUsername(socket.id), id: socket.id, player: 'player2' }],
         canJoin: false,
         state: GameState.PLAYING,
       };
@@ -185,22 +191,100 @@ io.on('connection', (socket) => {
           canChangeNumber: true,
           canUseLie: true,
         },
-        player1Turn: null,
-        player2Turn: null,
+        currentTurn: { player1: null, player2: null, turnNumber: 1 },
         turns: [],
-        waitingPlayerTurn: true,
       };
 
       gamePlayData[gameId] = gameData;
       updatedGame.players.forEach((player, i) => {
         const playData: IPlayData = {
           number: gameData[`player${i + 1}`].number,
-          player1FinishedTurn: false,
-          player2FinishedTurn: false,
+          turnSubmitted: false,
+          oppponentTurnSubmitted: false,
           turnResult: [],
         };
         io.to(player.id).emit('start-game', updatedGame, playData, player);
       });
+    }
+  });
+
+  socket.on('submit-turn', ({ guess, useLie = false, changeNumber = false }: IPlayerTurn) => {
+    const gameId = users[socket.id].game;
+    const currentGame = games[gameId];
+    const currentPlayerDetails = currentGame.players.find((player) => player.id === socket.id);
+    const otherPlayerDetails = currentGame.players.find((player) => player.id !== socket.id);
+    const currentPlayer = currentPlayerDetails.player;
+    const otherPlayer = otherPlayerDetails.player;
+
+    const currentGPData = gamePlayData[gameId];
+    if (currentGPData) {
+      // validate turn
+      if (currentGPData.currentTurn[currentPlayer]) return;
+      if (!guess) return;
+      if (useLie && !currentGPData[currentPlayer].canUseLie) return;
+      if (changeNumber && !currentGPData[currentPlayer].canChangeNumber) return;
+
+      const currentPlayerTurnResult: IPlayerTurnResult = {
+        guess,
+        changeNumber,
+        useLie,
+      };
+
+      const getGuessResult = (guessedNum, target, shouldLie) => {
+        console.log(guessedNum, target, shouldLie);
+        if (guessedNum > target) return shouldLie ? GuessResult.HIGHER : GuessResult.LOWER;
+        if (guessedNum < target) return shouldLie ? GuessResult.LOWER : GuessResult.HIGHER;
+        return GuessResult.CORRECT;
+      };
+
+      const newGamePlayData: IGameData = { ...currentGPData };
+
+      if (currentGPData.currentTurn[otherPlayer]) {
+        // end turn logic because both players submitted
+        const otherPlayerTurnResults: IPlayerTurnResult = currentGPData.currentTurn[otherPlayer];
+        const turnResult = {
+          turnNumber: currentGPData.currentTurn.turnNumber,
+          [otherPlayer]: {
+            ...otherPlayerTurnResults,
+            guessResult: getGuessResult(
+              otherPlayerTurnResults.guess,
+              currentGPData[currentPlayer].number,
+              currentPlayerTurnResult.useLie,
+            ),
+          },
+          [currentPlayer]: {
+            ...currentPlayerTurnResult,
+            guessResult: getGuessResult(
+              currentPlayerTurnResult.guess,
+              currentGPData[otherPlayer].number,
+              otherPlayerTurnResults.useLie,
+            ),
+          },
+        };
+        newGamePlayData.currentTurn = {
+          player1: null,
+          player2: null,
+          turnNumber: currentGPData.currentTurn.turnNumber + 1,
+        };
+        newGamePlayData.player1 = null;
+        newGamePlayData.player2 = null;
+        newGamePlayData.turns.push(turnResult as any);
+        gamePlayData[gameId] = newGamePlayData;
+
+        // update later to no obmitting if game over.
+        io.to(currentPlayerDetails.id).emit('turn-end', newGamePlayData.turns.map((turn) => omitOpponentData(turn, otherPlayer)));
+        io.to(otherPlayerDetails.id).emit('turn-end', newGamePlayData.turns.map((turn) => omitOpponentData(turn, currentPlayer)));
+      } else {
+        newGamePlayData[currentPlayer] = {
+          number: changeNumber ? getRandomNumber() : currentGPData[currentPlayer].number,
+          canChangeNumber: changeNumber
+            ? false : currentGPData[currentPlayer].canChangeNumber,
+          canUseLie: useLie ? false : currentGPData[currentPlayer].canUseLie,
+        };
+
+        newGamePlayData.currentTurn[currentPlayer] = currentPlayerTurnResult;
+        gamePlayData[gameId] = newGamePlayData;
+      }
     }
   });
 
