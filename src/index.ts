@@ -50,7 +50,7 @@ interface IPlayerTurn {
 }
 
 interface IPlayData {
-  turnResult: ITurnResult[]
+  turnResults: ITurnResult[]
   number: number
   turnSubmitted: boolean
   oppponentTurnSubmitted: boolean
@@ -120,7 +120,7 @@ const io = new Server(server, {
 const omitOpponentData = (turnRes: ITurnResult, player: string): ITurnResult => {
   const opponent = player === 'player1' ? 'player2' : 'player1';
   const opponentFullData = turnRes[opponent];
-  const opponentData = { guess: opponentFullData.guess, GuessResult: opponentFullData.guessResult };
+  const opponentData = { guess: opponentFullData.guess, guessResult: opponentFullData.guessResult };
   return { ...turnRes, [opponent]: opponentData };
 };
 
@@ -201,7 +201,7 @@ io.on('connection', (socket) => {
           number: gameData[`player${i + 1}`].number,
           turnSubmitted: false,
           oppponentTurnSubmitted: false,
-          turnResult: [],
+          turnResults: [],
         };
         io.to(player.id).emit('start-game', updatedGame, playData, player);
       });
@@ -266,14 +266,12 @@ io.on('connection', (socket) => {
           player2: null,
           turnNumber: currentGPData.currentTurn.turnNumber + 1,
         };
-        newGamePlayData.player1 = null;
-        newGamePlayData.player2 = null;
         newGamePlayData.turns.push(turnResult as any);
         gamePlayData[gameId] = newGamePlayData;
 
-        // update later to no obmitting if game over.
-        io.to(currentPlayerDetails.id).emit('turn-end', newGamePlayData.turns.map((turn) => omitOpponentData(turn, otherPlayer)));
-        io.to(otherPlayerDetails.id).emit('turn-end', newGamePlayData.turns.map((turn) => omitOpponentData(turn, currentPlayer)));
+        // update later to no obmitting game-end event if game over.
+        io.to(currentPlayerDetails.id).emit('turn-end', omitOpponentData(turnResult as any, otherPlayer));
+        io.to(otherPlayerDetails.id).emit('turn-end', omitOpponentData(turnResult as any, currentPlayer));
       } else {
         newGamePlayData[currentPlayer] = {
           number: changeNumber ? getRandomNumber() : currentGPData[currentPlayer].number,
