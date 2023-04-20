@@ -52,8 +52,6 @@ interface IPlayerTurn {
 interface IPlayData {
   turnResults: ITurnResult[]
   number: number
-  turnSubmitted: boolean
-  oppponentTurnSubmitted: boolean
 }
 
 interface IGameData {
@@ -84,7 +82,7 @@ const users: IUsers = {};
 // used to store game data - away from games object so other player moves are hidden
 const gamePlayData: IGameDatas = {};
 
-const getRandomNumber = () => Math.floor(Math.random() * 500) + 1;
+const getRandomNumber = () => Math.floor(Math.random() * 1000) + 1;
 
 const app = express();
 app.use(bodyParser.json());
@@ -166,7 +164,6 @@ io.on('connection', (socket) => {
   });
 
   socket.on('join-game', ({ gameId }) => {
-    console.log('joining', gameId);
     const existingGame = games[gameId];
     if (existingGame && existingGame.canJoin) {
       const updatedGame = {
@@ -197,13 +194,7 @@ io.on('connection', (socket) => {
 
       gamePlayData[gameId] = gameData;
       updatedGame.players.forEach((player, i) => {
-        const playData: IPlayData = {
-          number: gameData[`player${i + 1}`].number,
-          turnSubmitted: false,
-          oppponentTurnSubmitted: false,
-          turnResults: [],
-        };
-        io.to(player.id).emit('start-game', updatedGame, playData, player);
+        io.to(player.id).emit('start-game', updatedGame, gameData[`player${i + 1}`]);
       });
     }
   });
@@ -231,7 +222,6 @@ io.on('connection', (socket) => {
       };
 
       const getGuessResult = (guessedNum, target, shouldLie) => {
-        console.log(guessedNum, target, shouldLie);
         if (guessedNum > target) return shouldLie ? GuessResult.HIGHER : GuessResult.LOWER;
         if (guessedNum < target) return shouldLie ? GuessResult.LOWER : GuessResult.HIGHER;
         return GuessResult.CORRECT;
@@ -242,13 +232,31 @@ io.on('connection', (socket) => {
       if (currentGPData.currentTurn[otherPlayer]) {
         // end turn logic because both players submitted
         const otherPlayerTurnResults: IPlayerTurnResult = currentGPData.currentTurn[otherPlayer];
+
+        newGamePlayData[currentPlayer] = {
+          number: currentPlayerTurnResult.changeNumber
+            ? getRandomNumber() : currentGPData[currentPlayer].number,
+          canChangeNumber: currentPlayerTurnResult.changeNumber
+            ? false : currentGPData[currentPlayer].canChangeNumber,
+          canUseLie: currentPlayerTurnResult.useLie
+            ? false : currentGPData[currentPlayer].canUseLie,
+        };
+
+        newGamePlayData[otherPlayer] = {
+          number: otherPlayerTurnResults.changeNumber
+            ? getRandomNumber() : currentGPData[otherPlayer].number,
+          canChangeNumber: otherPlayerTurnResults.changeNumber
+            ? false : currentGPData[otherPlayer].canChangeNumber,
+          canUseLie: otherPlayerTurnResults.useLie
+            ? false : currentGPData[otherPlayer].canUseLie,
+        };
         const turnResult = {
           turnNumber: currentGPData.currentTurn.turnNumber,
           [otherPlayer]: {
             ...otherPlayerTurnResults,
             guessResult: getGuessResult(
               otherPlayerTurnResults.guess,
-              currentGPData[currentPlayer].number,
+              newGamePlayData[currentPlayer].number,
               currentPlayerTurnResult.useLie,
             ),
           },
@@ -256,7 +264,7 @@ io.on('connection', (socket) => {
             ...currentPlayerTurnResult,
             guessResult: getGuessResult(
               currentPlayerTurnResult.guess,
-              currentGPData[otherPlayer].number,
+              newGamePlayData[otherPlayer].number,
               otherPlayerTurnResults.useLie,
             ),
           },
@@ -267,19 +275,21 @@ io.on('connection', (socket) => {
           turnNumber: currentGPData.currentTurn.turnNumber + 1,
         };
         newGamePlayData.turns.push(turnResult as any);
+
         gamePlayData[gameId] = newGamePlayData;
 
         // update later to no obmitting game-end event if game over.
-        io.to(currentPlayerDetails.id).emit('turn-end', omitOpponentData(turnResult as any, otherPlayer));
-        io.to(otherPlayerDetails.id).emit('turn-end', omitOpponentData(turnResult as any, currentPlayer));
+        io.to(currentPlayerDetails.id).emit(
+          'turn-end',
+          omitOpponentData(turnResult as any, otherPlayer),
+          newGamePlayData[currentPlayer],
+        );
+        io.to(otherPlayerDetails.id).emit(
+          'turn-end',
+          omitOpponentData(turnResult as any, currentPlayer),
+          newGamePlayData[otherPlayer],
+        );
       } else {
-        newGamePlayData[currentPlayer] = {
-          number: changeNumber ? getRandomNumber() : currentGPData[currentPlayer].number,
-          canChangeNumber: changeNumber
-            ? false : currentGPData[currentPlayer].canChangeNumber,
-          canUseLie: useLie ? false : currentGPData[currentPlayer].canUseLie,
-        };
-
         newGamePlayData.currentTurn[currentPlayer] = currentPlayerTurnResult;
         gamePlayData[gameId] = newGamePlayData;
       }
