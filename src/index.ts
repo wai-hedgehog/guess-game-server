@@ -12,6 +12,12 @@ enum GameState {
   FINISHED = 'FINISHED',
 }
 
+enum GameResult {
+  WIN = 'WIN',
+  LOSE = 'LOSE',
+  DRAW = 'DRAW',
+}
+
 interface IPlayer {
   username: string
   id: string
@@ -47,11 +53,6 @@ interface IPlayerTurn {
   guess: number
   useLie: boolean
   changeNumber: boolean
-}
-
-interface IPlayData {
-  turnResults: ITurnResult[]
-  number: number
 }
 
 interface IGameData {
@@ -279,16 +280,45 @@ io.on('connection', (socket) => {
         gamePlayData[gameId] = newGamePlayData;
 
         // update later to no obmitting game-end event if game over.
-        io.to(currentPlayerDetails.id).emit(
-          'turn-end',
-          omitOpponentData(turnResult as any, otherPlayer),
-          newGamePlayData[currentPlayer],
-        );
-        io.to(otherPlayerDetails.id).emit(
-          'turn-end',
-          omitOpponentData(turnResult as any, currentPlayer),
-          newGamePlayData[otherPlayer],
-        );
+
+        const currentPlayerGuessResult = (turnResult as any)[currentPlayer].guessResult;
+        const otherPlayerGuessResult = (turnResult as any)[otherPlayer].guessResult;
+
+        // game over
+        if (currentPlayerGuessResult === GuessResult.CORRECT
+            || otherPlayerGuessResult === GuessResult.CORRECT) {
+          const newGame = { ...games[gameId] };
+          newGame.state = GameState.FINISHED;
+          games[gameId] = newGame;
+          let currentPlayerGameResult: GameResult;
+          let otherPlayerGameResult: GameResult;
+
+          if (currentPlayerGuessResult !== GuessResult.CORRECT) {
+            currentPlayerGameResult = GameResult.LOSE;
+            otherPlayerGameResult = GameResult.WIN;
+          } else if (otherPlayerGuessResult === GuessResult.CORRECT) {
+            currentPlayerGameResult = GameResult.DRAW;
+            otherPlayerGameResult = GameResult.DRAW;
+          } else {
+            currentPlayerGameResult = GameResult.WIN;
+            otherPlayerGameResult = GameResult.LOSE;
+          }
+
+          io.to(currentPlayerDetails.id).emit('game-end', newGamePlayData.turns, currentPlayerGameResult);
+          io.to(otherPlayerDetails.id).emit('game-end', newGamePlayData.turns, otherPlayerGameResult);
+        } else {
+          // next turn
+          io.to(currentPlayerDetails.id).emit(
+            'turn-end',
+            omitOpponentData(turnResult as any, currentPlayer),
+            newGamePlayData[currentPlayer],
+          );
+          io.to(otherPlayerDetails.id).emit(
+            'turn-end',
+            omitOpponentData(turnResult as any, otherPlayer),
+            newGamePlayData[otherPlayer],
+          );
+        }
       } else {
         newGamePlayData.currentTurn[currentPlayer] = currentPlayerTurnResult;
         gamePlayData[gameId] = newGamePlayData;
