@@ -33,8 +33,8 @@ enum GuessResult {
 interface IPlayerTurnResult {
   guess: number
   guessResult?: GuessResult
-  useLie: boolean
-  changeNumber: boolean
+  usedLie: boolean
+  changedNumber: boolean
 }
 
 interface ITurnResult {
@@ -60,6 +60,7 @@ interface IGameData {
   player2: IGamePlayer
   currentTurn: ITurnResult
   turns: ITurnResult[]
+  rematchWanted: boolean
 }
 interface IGameDatas { [key:string]: IGameData}
 
@@ -191,6 +192,7 @@ io.on('connection', (socket) => {
         },
         currentTurn: { player1: null, player2: null, turnNumber: 1 },
         turns: [],
+        rematchWanted: false,
       };
 
       gamePlayData[gameId] = gameData;
@@ -218,8 +220,8 @@ io.on('connection', (socket) => {
 
       const currentPlayerTurnResult: IPlayerTurnResult = {
         guess,
-        changeNumber,
-        useLie,
+        changedNumber: changeNumber,
+        usedLie: useLie,
       };
 
       const getGuessResult = (guessedNum, target, shouldLie) => {
@@ -235,20 +237,20 @@ io.on('connection', (socket) => {
         const otherPlayerTurnResults: IPlayerTurnResult = currentGPData.currentTurn[otherPlayer];
 
         newGamePlayData[currentPlayer] = {
-          number: currentPlayerTurnResult.changeNumber
+          number: currentPlayerTurnResult.changedNumber
             ? getRandomNumber() : currentGPData[currentPlayer].number,
-          canChangeNumber: currentPlayerTurnResult.changeNumber
+          canChangeNumber: currentPlayerTurnResult.changedNumber
             ? false : currentGPData[currentPlayer].canChangeNumber,
-          canUseLie: currentPlayerTurnResult.useLie
+          canUseLie: currentPlayerTurnResult.usedLie
             ? false : currentGPData[currentPlayer].canUseLie,
         };
 
         newGamePlayData[otherPlayer] = {
-          number: otherPlayerTurnResults.changeNumber
+          number: otherPlayerTurnResults.changedNumber
             ? getRandomNumber() : currentGPData[otherPlayer].number,
-          canChangeNumber: otherPlayerTurnResults.changeNumber
+          canChangeNumber: otherPlayerTurnResults.changedNumber
             ? false : currentGPData[otherPlayer].canChangeNumber,
-          canUseLie: otherPlayerTurnResults.useLie
+          canUseLie: otherPlayerTurnResults.usedLie
             ? false : currentGPData[otherPlayer].canUseLie,
         };
         const turnResult = {
@@ -258,7 +260,7 @@ io.on('connection', (socket) => {
             guessResult: getGuessResult(
               otherPlayerTurnResults.guess,
               newGamePlayData[currentPlayer].number,
-              currentPlayerTurnResult.useLie,
+              currentPlayerTurnResult.usedLie,
             ),
           },
           [currentPlayer]: {
@@ -266,7 +268,7 @@ io.on('connection', (socket) => {
             guessResult: getGuessResult(
               currentPlayerTurnResult.guess,
               newGamePlayData[otherPlayer].number,
-              otherPlayerTurnResults.useLie,
+              otherPlayerTurnResults.usedLie,
             ),
           },
         };
@@ -332,6 +334,51 @@ io.on('connection', (socket) => {
     io.emit('games', games);
   });
 
+  socket.on('rematch', () => {
+    const gameId = users[socket.id].game;
+    const currentGameData: IGameData = { ...gamePlayData[gameId] };
+    if (currentGameData.rematchWanted) {
+      // restart game
+      const newGame: IGame = { ...games[gameId] };
+      newGame.state = GameState.PLAYING;
+      games[gameId] = newGame;
+      const newGameData: IGameData = {
+        player1: {
+          number: getRandomNumber(),
+          canChangeNumber: true,
+          canUseLie: true,
+        },
+        player2: {
+          number: getRandomNumber(),
+          canChangeNumber: true,
+          canUseLie: true,
+        },
+        currentTurn: { player1: null, player2: null, turnNumber: 1 },
+        turns: [],
+        rematchWanted: false,
+      };
+      gamePlayData[gameId] = newGameData;
+      newGame.players.forEach((player, i) => {
+        io.to(player.id).emit('rematch-start', newGame, newGameData[`player${i + 1}`]);
+      });
+    } else {
+      currentGameData.rematchWanted = true;
+      gamePlayData[gameId] = currentGameData;
+      const otherPlayer = games[gameId].players.find((player) => player.id !== socket.id);
+      io.to(otherPlayer.id).emit('rematch-wanted');
+    }
+  });
+
+  socket.on('quit-game', () => {
+    const gameId = users[socket.id].game;
+    if (!gameId) return;
+    const otherPlayer = games[gameId].players.find((player) => player.id !== socket.id);
+    io.to(otherPlayer.id).emit('opponent-left');
+    delete games[gameId];
+    delete gamePlayData[gameId];
+    delete users[socket.id].game;
+    delete users[otherPlayer.id].game;
+  });
   setInterval(() => emitStats(socket), 1000);
 });
 
