@@ -337,6 +337,7 @@ io.on('connection', (socket) => {
 
   socket.on('rematch', () => {
     const gameId = users[socket.id].game;
+    if (!gameId) return;
     const currentGameData: IGameData = { ...gamePlayData[gameId] };
     if (currentGameData.rematchWanted) {
       // restart game
