@@ -203,7 +203,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('submit-turn', ({ guess, useLie = false, changeNumber = false }: IPlayerTurn) => {
-    const gameId = users[socket.id].game;
+    const gameId = users[socket.id]?.game;
+    if (!gameId) return;
     const currentGame = games[gameId];
     const currentPlayerDetails = currentGame.players.find((player) => player.id === socket.id);
     const otherPlayerDetails = currentGame.players.find((player) => player.id !== socket.id);
