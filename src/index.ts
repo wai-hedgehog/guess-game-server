@@ -87,7 +87,7 @@ const users: IUsers = {};
 // used to store game data - away from games object so other player moves are hidden
 const gamePlayData: IGameDatas = {};
 
-const getRandomNumber = () => Math.floor(Math.random() * 1000) + 1;
+const getRandomNumber = () => Math.floor(Math.random() * 500) + 1;
 
 const app = express();
 app.use(bodyParser.json());
