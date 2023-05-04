@@ -100,6 +100,10 @@ app.get('/', (_req, res) => {
   });
 });
 
+app.get('/games', (_req, res) => {
+  res.send({ games });
+});
+
 app.post('/login', (req, res) => {
   const { username, socketId } = (req.body);
   if (users[socketId] || !Object.values(users).find((user) => user.username === username)) {
