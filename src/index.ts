@@ -87,7 +87,7 @@ const users: IUsers = {};
 // used to store game data - away from games object so other player moves are hidden
 const gamePlayData: IGameDatas = {};
 
-const getRandomNumber = () => Math.floor(Math.random() * 500) + 1;
+const getRandomNumber = () => Math.floor(Math.random() * (+process.env.NUMBER_LIMIT)) + 1;
 
 const app = express();
 app.use(bodyParser.json());
@@ -96,7 +96,7 @@ app.use(cors());
 
 app.get('/', (_req, res) => {
   res.send({
-    uptime: process.uptime(), games, users, gamePlayData,
+    uptime: process.uptime(), games: Object.keys(games).length, users: Object.keys(users),
   });
 });
 
@@ -107,10 +107,6 @@ app.post('/login', (req, res) => {
     return res.send({ login: true });
   }
   return res.send({ login: false });
-});
-
-app.get('/games', (_req, res) => {
-  res.send({ games });
 });
 
 const server = createServer(app);
