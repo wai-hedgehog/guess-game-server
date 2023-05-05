@@ -441,7 +441,8 @@ io.on('connection', (socket) => {
       console.error('QUIT_GAME_EVENT', e);
     }
   });
-  setInterval(() => emitStats(socket), 1000);
+  // long intervals to prevent being rate limited when hosting on free services
+  setInterval(() => emitStats(socket), 15000);
 });
 
 server.listen(PORT, () => console.log(`Listening on ${PORT}`));
