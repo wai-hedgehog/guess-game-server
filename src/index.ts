@@ -36,8 +36,9 @@ enum GuessResult {
 interface IPlayerTurnResult {
   guess: number
   guessResult?: GuessResult
-  usedLie: boolean
-  changedNumber: boolean
+  usedLie?: boolean
+  changedNumber?: boolean
+  changedNumberInfo?: { original: number, newNumber?: number }
 }
 
 interface ITurnResult {
@@ -47,6 +48,7 @@ interface ITurnResult {
 }
 
 interface IGamePlayer {
+  originalNumber: number
   number: number
   canChangeNumber: boolean
   canUseLie: boolean
@@ -192,14 +194,18 @@ io.on('connection', (socket) => {
         users[socket.id] = { ...users[socket.id], game: gameId };
         socket.join(gameId);
 
+        const p1Number = getRandomNumber();
+        const p2Number = getRandomNumber();
         const gameData: IGameData = {
           player1: {
-            number: getRandomNumber(),
+            originalNumber: p1Number,
+            number: p1Number,
             canChangeNumber: true,
             canUseLie: true,
           },
           player2: {
-            number: getRandomNumber(),
+            originalNumber: p2Number,
+            number: p2Number,
             canChangeNumber: true,
             canUseLie: true,
           },
@@ -255,6 +261,7 @@ io.on('connection', (socket) => {
           const otherPlayerTurnResults: IPlayerTurnResult = currentGPData.currentTurn[otherPlayer];
 
           newGamePlayData[currentPlayer] = {
+            originalNumber: currentGPData[currentPlayer].originalNumber,
             number: currentPlayerTurnResult.changedNumber
               ? getRandomNumber() : currentGPData[currentPlayer].number,
             canChangeNumber: currentPlayerTurnResult.changedNumber
@@ -264,6 +271,7 @@ io.on('connection', (socket) => {
           };
 
           newGamePlayData[otherPlayer] = {
+            originalNumber: currentGPData[otherPlayer].originalNumber,
             number: otherPlayerTurnResults.changedNumber
               ? getRandomNumber() : currentGPData[otherPlayer].number,
             canChangeNumber: otherPlayerTurnResults.changedNumber
@@ -271,6 +279,11 @@ io.on('connection', (socket) => {
             canUseLie: otherPlayerTurnResults.usedLie
               ? false : currentGPData[otherPlayer].canUseLie,
           };
+
+          const currentPlayerChangedNumber = newGamePlayData[currentPlayer].number
+          !== newGamePlayData[currentPlayer].originalNumber;
+          const otherPlayerChangedNumber = newGamePlayData[otherPlayer].number
+          !== newGamePlayData[otherPlayer].originalNumber;
           const turnResult = {
             turnNumber: currentGPData.currentTurn.turnNumber,
             [otherPlayer]: {
@@ -280,6 +293,10 @@ io.on('connection', (socket) => {
                 newGamePlayData[currentPlayer].number,
                 currentPlayerTurnResult.usedLie,
               ),
+              changedNumberInfo: {
+                original: newGamePlayData[otherPlayer].originalNumber,
+                ...(otherPlayerChangedNumber && { newNumber: newGamePlayData[otherPlayer].number }),
+              },
             },
             [currentPlayer]: {
               ...currentPlayerTurnResult,
@@ -288,6 +305,11 @@ io.on('connection', (socket) => {
                 newGamePlayData[otherPlayer].number,
                 otherPlayerTurnResults.usedLie,
               ),
+              changedNumberInfo: {
+                original: newGamePlayData[currentPlayer].originalNumber,
+                ...(currentPlayerChangedNumber
+                    && { newNumber: newGamePlayData[currentPlayer].number }),
+              },
             },
           };
           newGamePlayData.currentTurn = {
@@ -370,14 +392,19 @@ io.on('connection', (socket) => {
         const newGame: IGame = { ...games[gameId] };
         newGame.state = GameState.PLAYING;
         games[gameId] = newGame;
+
+        const p1Number = getRandomNumber();
+        const p2Number = getRandomNumber();
         const newGameData: IGameData = {
           player1: {
-            number: getRandomNumber(),
+            originalNumber: p1Number,
+            number: p1Number,
             canChangeNumber: true,
             canUseLie: true,
           },
           player2: {
-            number: getRandomNumber(),
+            originalNumber: p2Number,
+            number: p2Number,
             canChangeNumber: true,
             canUseLie: true,
           },
