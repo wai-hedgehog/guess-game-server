@@ -187,8 +187,8 @@ io.on('connection', (socket) => {
           canJoin: false,
           state: GameState.PLAYING,
         };
-        io.emit('games', games);
         games[gameId] = updatedGame;
+        io.emit('games', games);
         users[socket.id] = { ...users[socket.id], game: gameId };
         socket.join(gameId);
 
