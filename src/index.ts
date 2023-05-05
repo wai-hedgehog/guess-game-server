@@ -146,6 +146,7 @@ io.on('connection', (socket) => {
           users[player.id].game = undefined;
         });
         delete games[gameId];
+        io.emit('games', games);
       }
       delete users[socket.id];
     } catch (e) {
@@ -350,8 +351,9 @@ io.on('connection', (socket) => {
 
   socket.on('cancel-game', () => {
     try {
+      const gameId = users[socket.id]?.game;
       users[socket.id] = { ...users[socket.id], game: null };
-      delete games[socket.id];
+      delete games[gameId];
       io.emit('games', games);
     } catch (e) {
       console.error('CANCEL_GAME_EVENT', e);
